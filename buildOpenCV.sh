@@ -11,11 +11,12 @@ CMAKE_INSTALL_PREFIX=/usr/local
 # Download the opencv_extras repository
 # If you are installing the opencv testdata, ie
 #  OPENCV_TEST_DATA_PATH=../opencv_extra/testdata
-# Make sure that you set this to YES
+# Make sure that you set this to YES (same for opencv contrib)
 # Value should be YES or NO
-DOWNLOAD_OPENCV_EXTRAS=NO
+DOWNLOAD_OPENCV_EXTRAS=YES
+DOWNLOAD_OPENCV_CONTRIB=YES
 # Source code directory
-OPENCV_SOURCE_DIR=$HOME
+OPENCV_SOURCE_DIR=$HOME/Downloads
 WHEREAMI=$PWD
 
 source scripts/jetson_variables
@@ -29,6 +30,10 @@ echo " OpenCV binaries will be installed in: $CMAKE_INSTALL_PREFIX"
 
 if [ $DOWNLOAD_OPENCV_EXTRAS == "YES" ] ; then
  echo "Also installing opencv_extras"
+fi
+
+if [ $DOWNLOAD_OPENCV_CONTRIB == "YES" ] ; then
+ echo "Also installing opencv_contrib"
 fi
 
 # Repository setup
@@ -65,7 +70,11 @@ cd /usr/local/cuda/include
 sudo patch -N cuda_gl_interop.h $WHEREAMI'/patches/OpenGLHeader.patch' 
 # Clean up the OpenGL tegra libs that usually get crushed
 cd /usr/lib/aarch64-linux-gnu/
+# before: libGL.so -> mesa/libGL.so
+# after:  libGL.so -> tegra/libGL.so
 sudo ln -sf tegra/libGL.so libGL.so
+
+cd $WHEREAMI
 
 # Python 2.7
 sudo apt-get install -y python-dev python-numpy python-py python-pytest
@@ -86,10 +95,17 @@ fi
 
 if [ $DOWNLOAD_OPENCV_EXTRAS == "YES" ] ; then
  echo "Installing opencv_extras"
- # This is for the test data
- cd $SOURCE_CODE_DIR
+ cd $OPENCV_SOURCE_DIR
  git clone https://github.com/opencv/opencv_extra.git
  cd opencv_extra
+ git checkout -b v${OPENCV_VERSION} ${OPENCV_VERSION}
+fi
+
+if [ $DOWNLOAD_OPENCV_CONTRIB == "YES" ] ; then
+ echo "Installing opencv_contrib"
+ cd $OPENCV_SOURCE_DIR
+ git clone https://github.com/opencv/opencv_contrib.git
+ cd opencv_contrib
  git checkout -b v${OPENCV_VERSION} ${OPENCV_VERSION}
 fi
 
@@ -103,9 +119,30 @@ cd build
 #     -D OPENCV_TEST_DATA_PATH=../opencv_extra/testdata \
 #     -D INSTALL_C_EXAMPLES=ON \
 #     -D INSTALL_PYTHON_EXAMPLES=ON \
+#     -D WITH_JAVA=ON \
+#
+# Optional:
+#     -D PYTHON2_EXECUTABLE=$(which python2) \
+#     -D PYTHON2_INCLUDE_DIR=$(python2 -c "from distutils.sysconfig import get_python_inc; print(get_python_inc())") \
+#     -D PYTHON2_PACKAGES_PATH=$(python2 -c "from distutils.sysconfig import get_python_lib; print(get_python_lib())") \
+#     -D PYTHON3_EXECUTABLE=$(which python3) \
+#     -D PYTHON3_INCLUDE_DIR=$(python3 -c "from distutils.sysconfig import get_python_inc; print(get_python_inc())") \
+#     -D PYTHON3_PACKAGES_PATH=$(python3 -c "from distutils.sysconfig import get_python_lib; print(get_python_lib())") \
+#
+# Unsupported options:
+#     -D WITH_IPP=ON \
+#     -D WITH_TBB=ON \
+#     -D ENABLE_AVX=ON \
+#
+# Not tested:
+#     -D WITH_FFMPEG=ON \
+#     -D FFMPEG_INCLUDE_DIR=/usr/local/ffmpeg/3.3.3/include/ \
+#     -D FFMPEG_LIB_DIR=/usr/local/ffmpeg/3.3.3/lib/ \
+#
 # There are also switches which tell CMAKE to build the samples and tests
 # Check OpenCV documentation for details
 
+# Enabled by default: opencv_extra & opencv_contrib
 time cmake -D CMAKE_BUILD_TYPE=RELEASE \
       -D CMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX} \
       -D WITH_CUDA=ON \
@@ -119,6 +156,16 @@ time cmake -D CMAKE_BUILD_TYPE=RELEASE \
       -D WITH_GSTREAMER_0_10=OFF \
       -D WITH_QT=ON \
       -D WITH_OPENGL=ON \
+      -D WITH_JAVA=OFF \
+      -D ENABLE_CXX11=ON \
+      -D BUILD_TESTS=ON \
+      -D INSTALL_TESTS=ON \
+      -D OPENCV_TEST_DATA_PATH=${OPENCV_SOURCE_DIR}/opencv_extra/testdata \
+      -D OPENCV_EXTRA_MODULES_PATH=${OPENCV_SOURCE_DIR}/opencv_contrib/modules \
+      -D BUILD_PERF_TESTS=OFF \
+      -D BUILD_EXAMPLES=ON \
+      -D INSTALL_C_EXAMPLES=ON \
+      -D INSTALL_PYTHON_EXAMPLES=ON \
       ../
 
 if [ $? -eq 0 ] ; then
@@ -130,7 +177,19 @@ else
   exit 1
 fi
 
+# How to boost the power of TX2 to 15W?
+# You can set max clocks with this from the home directory:
+# sudo ./jetson_clocks.sh
+# However, you may like to use also"save" and "restore" functions with that:
+# sudo /home/ubuntu/jetson_clocks.sh --store       # save clocks config into l4t_dfs.conf file
+# sudo /home/ubuntu/jetson_clocks.sh               # boost clocks
+# sudo /home/ubuntu/jetson_clocks.sh --restore     # restore clocks config from l4t_dfs.conf file
+# or use nvpmodel
+# https://www.jetsonhacks.com/2017/03/25/nvpmodel-nvidia-jetson-tx2-development-kit/
 # Consider $ sudo nvpmodel -m 2 or $ sudo nvpmodel -m 0
+# You can query which mode is currently being used:
+# sudo nvpmodel -q --verbose
+# Default: NVPM VERB: Current mode: NV Power Mode: MAXP_CORE_ARM (mode 3)
 NUM_CPU=$(nproc)
 time make -j$(($NUM_CPU - 1))
 if [ $? -eq 0 ] ; then
